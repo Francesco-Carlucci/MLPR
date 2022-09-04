@@ -2,6 +2,7 @@ import numpy as np
 import scipy.special
 import matplotlib.pyplot as plt
 from util import loadPulsar,PCA,ZNormalization,Ksplit
+import time
 
 def vcol(v):
     return v.reshape(v.size,1)
@@ -12,7 +13,8 @@ def logpdf_GAU_ND(x, mu, C):  # C is sigma,covariance matrix
     _, logdetC = np.linalg.slogdet(C)
     invC = np.linalg.inv(C)
     D=x.shape[0]
-    Mat=0.5*np.dot(np.dot((x-mu).T,invC),(x-mu)).diagonal()
+    #Mat=0.5*np.dot(np.dot((x-mu).T,invC),(x-mu)).diagonal()
+    Mat = 0.5 * np.multiply(np.dot((x - mu).T, invC).T, (x - mu)).sum(axis=0)
     res2=-D/2*np.log(2*np.pi)-0.5*logdetC-Mat
 
     return np.array(res2)
@@ -125,18 +127,27 @@ def EM_GMMparams(GMMdata,GMMparams,EMStop,diagFlag=0,tiedFlag=0):
         print('log likelihood: ',avgll)
 
     return GMMparams
-
-
-#GMMinit1 = [(1.0, mu1, constrainCovMat([S1],1,eps)[0]) for i in range(M)]
-#mu2, S2 = compute_mu_s(GMMdata2)
-#GMMinit2 = [(1.0, mu2, constrainCovMat([S2],1,eps)[0]) for i in range(M)]
-# GMMinit0 = [(1.0, mu0, constrainCovMat([S0],1,eps)[0]) for i in range(M)]
 """
-GMMparams0 = EM_GMMparams(GMMdata0, GMMinit0, EMStop, diag, tied)
-GMMparams1 = EM_GMMparams(GMMdata1, GMMinit1, EMStop, diag, tied)
-GMMparams2 = EM_GMMparams(GMMdata2, GMMinit2, EMStop, diag, tied)
-"""
+def KfoldLBG(folds, labels,i):
+    trainingSet = []
+    labelsOfTrainingSet = []
+    for j in range(k):
+        if j != i:
+            trainingSet.append(folds[j])
+            labelsOfTrainingSet.append(labels[j])
+    evaluationSet = folds[i]
+    orderedLabels.append(labels[i])
+    trainingSet = np.hstack(trainingSet)
+    labelsOfTrainingSet = np.hstack(labelsOfTrainingSet)
+    trainSet0 = trainingSet[:, labelsOfTrainingSet == 0]
+    trainSet1 = trainingSet[:, labelsOfTrainingSet == 1]
+    mu0, S0 = compute_mu_s(trainSet0)
+    mu1, S1 = compute_mu_s(trainSet1)
+    GMMList0 = LBGAlgorithm(trainSet0, mu0, constrainCovMat([S0], 1, psi)[0], EMStop, alpha, splitnum, diag, tied)
+    GMMList1 = LBGAlgorithm(trainSet1, mu1, constrainCovMat([S1], 1, psi)[0], EMStop, alpha, splitnum, diag, tied)
 
+    return computellr(evaluationSet, GMMList0[splitIdx], GMMList1[splitIdx]), i
+"""
 def GMMClf(DTR,LTR,M,EMStop=1e-6,alpha=0.1,psi=0.01, diag=0,tied=0 ):
 
     splitnum = int(np.log2(M))
@@ -169,20 +180,13 @@ def GMMClf(DTR,LTR,M,EMStop=1e-6,alpha=0.1,psi=0.01, diag=0,tied=0 ):
         GMMList0 = LBGAlgorithm(trainSet0, mu0, constrainCovMat([S0],1,psi)[0], EMStop, alpha, splitnum, diag, tied)
         GMMList1 = LBGAlgorithm(trainSet1, mu1, constrainCovMat([S1],1,psi)[0], EMStop, alpha, splitnum, diag, tied)
 
-        #foldScore=[]
         for splitIdx in range(splitnum):
             #crea vettore riga degli score di ogni split
             scores[splitIdx].append(computellr(evaluationSet, GMMList0[splitIdx], GMMList1[splitIdx]))
-        #scores.append(foldScore)
-        #scores.append(binaryLogisticRegression(trainingSet, labelsOfTrainingSet, evaluationSet, l, 0.5))
-    #scores = np.vstack(scores)
+        
+
     orderedLabels = np.hstack(orderedLabels)
 
-    """
-    splitnum=int(np.log2(M))
-    GMMList0 = LBGAlgorithm(GMMdata0,mu0,S0,EMStop,alpha,splitnum,diag,tied)
-    GMMList1 = LBGAlgorithm(GMMdata1,mu1, S1, EMStop, alpha, splitnum,diag,tied)
-    """
     dcf1=[]
     dcf5=[]
     dcf9=[]
@@ -218,12 +222,9 @@ def confMat(predLabels,labels,nClasses):
             confMat[i, j] = np.dot(predH.astype(int), corrH.astype(int).T)
     return confMat
 
-
 if __name__=="__main__":
     PCA_flag = False
-    PCA_factor = 6
-
-    priors=[0.5,0.9,0.1]
+    PCA_factor = 7
 
     (DTR, LTR), (DTE, LTE) = loadPulsar()
     # Z normalization of data
@@ -235,10 +236,12 @@ if __name__=="__main__":
         DTE=PCA(DTE,PCA_factor)
 
     EMStop=1e-6
-    Mmax=8   #numero massimo di componenti
+    Mmax=64   #numero massimo di componenti
 
     xplot=[2**(i+1) for i in range(int(np.log2(Mmax)))]
+    start=time.time()
     dcf1,dcf5,dcf9 = GMMClf(DTR, LTR, Mmax)
+    print(time.time()-start)
 
     plt.figure()
     print('dcf1:', dcf1)
@@ -251,5 +254,91 @@ if __name__=="__main__":
     plt.xlabel('components')
     plt.ylabel('min DCF')
     plt.xscale('log')
-    plt.show()
+    plt.savefig('plotNoPCAFull.svg', bbox_inches='tight')
+    plt.savefig('plotNoPCAFull.png', bbox_inches='tight')
 
+    #DIAG
+    dcf1, dcf5, dcf9 = GMMClf(DTR, LTR, Mmax,diag=1)
+
+    plt.figure()
+    print('dcf1:', dcf1)
+    print('dcf5:', dcf5)
+    print('dcf9:', dcf9)
+    plt.plot(xplot, dcf1, label='minDCF prior=0.1')
+    plt.plot(xplot, dcf5, label='minDCF prior=0.5')
+    plt.plot(xplot, dcf9, label='minDCF prior=0.9')
+    plt.legend()
+    plt.xlabel('components')
+    plt.ylabel('min DCF')
+    plt.xscale('log')
+    plt.savefig('plotNoPCAdiag.svg', bbox_inches='tight')
+    plt.savefig('plotNoPCAdiag.png', bbox_inches='tight')
+
+    #TIED
+
+    dcf1, dcf5, dcf9 = GMMClf(DTR, LTR, Mmax,tied=1)
+
+    plt.figure()
+    print('dcf1:', dcf1)
+    print('dcf5:', dcf5)
+    print('dcf9:', dcf9)
+    plt.plot(xplot, dcf1, label='minDCF prior=0.1')
+    plt.plot(xplot, dcf5, label='minDCF prior=0.5')
+    plt.plot(xplot, dcf9, label='minDCF prior=0.9')
+    plt.legend()
+    plt.xlabel('components')
+    plt.ylabel('min DCF')
+    plt.xscale('log')
+    plt.savefig('plotNoPCAtied.svg', bbox_inches='tight')
+    plt.savefig('plotNoPCAtied.png', bbox_inches='tight')
+
+    DTR = PCA(DTR, PCA_factor)
+    DTE = PCA(DTE, PCA_factor)
+
+    xplot = [2 ** (i + 1) for i in range(int(np.log2(Mmax)))]
+    dcf1, dcf5, dcf9 = GMMClf(DTR, LTR, Mmax)
+
+    plt.figure()
+    print('dcf1:', dcf1)
+    print('dcf5:', dcf5)
+    print('dcf9:', dcf9)
+    plt.plot(xplot, dcf1, label='minDCF prior=0.1')
+    plt.plot(xplot, dcf5, label='minDCF prior=0.5')
+    plt.plot(xplot, dcf9, label='minDCF prior=0.9')
+    plt.legend()
+    plt.xlabel('components')
+    plt.ylabel('min DCF')
+    plt.xscale('log')
+    plt.savefig('plotPCA7Full.svg', bbox_inches='tight')
+    plt.savefig('plotPCA7Full.png', bbox_inches='tight')
+
+    dcf1, dcf5, dcf9 = GMMClf(DTR, LTR, Mmax,diag=1)
+
+    plt.figure()
+    print('dcf1:', dcf1)
+    print('dcf5:', dcf5)
+    print('dcf9:', dcf9)
+    plt.plot(xplot, dcf1, label='minDCF prior=0.1')
+    plt.plot(xplot, dcf5, label='minDCF prior=0.5')
+    plt.plot(xplot, dcf9, label='minDCF prior=0.9')
+    plt.legend()
+    plt.xlabel('components')
+    plt.ylabel('min DCF')
+    plt.xscale('log')
+    plt.savefig('plotPCA7diag.svg', bbox_inches='tight')
+    plt.savefig('plotPCA7diag.png', bbox_inches='tight')
+
+    dcf1, dcf5, dcf9 = GMMClf(DTR, LTR, Mmax,tied=1)
+
+    plt.figure()
+    print('dcf1:', dcf1)
+    print('dcf5:', dcf5)
+    print('dcf9:', dcf9)
+    plt.plot(xplot, dcf1, label='minDCF prior=0.1')
+    plt.plot(xplot, dcf5, label='minDCF prior=0.5')
+    plt.plot(xplot, dcf9, label='minDCF prior=0.9')
+    plt.legend()
+    plt.xlabel('components')
+    plt.ylabel('min DCF')
+    plt.savefig('plotPCA7tied.svg', bbox_inches='tight')
+    plt.savefig('plotPCA7tied.png', bbox_inches='tight')
