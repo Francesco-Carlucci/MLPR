@@ -138,8 +138,8 @@ def scheduleTask(mainTask,workingVet,DTR,LTR):
     return resVet
 
 if __name__=='__main__':
-    PCA_flag = True
-    PCA_factor = 6
+    PCA_flag = False
+    PCA_factor = 7
     logRegPlot = False
 
     priors = [0.5, 0.9, 0.1]
